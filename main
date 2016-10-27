@@ -1,0 +1,114 @@
+#include <Servo.h>
+#include <Conceptinetics.h>
+
+#define DMX_SLAVE_CHANNELS   1 
+
+DMX_Slave dmx_slave ( DMX_SLAVE_CHANNELS );
+
+#define RAISE_STRENGTH 230
+#define LOWER_STRENGTH 54
+
+#define ENABLE  3
+#define RAISE  4
+#define LOWER  5
+#define RAISE_CLEAR 2
+#define LOWER_CLEAR 7
+
+#define JAW_PIN 9
+#define MIC_PIN 0
+
+Servo jaw;
+
+const int sampleWindow = 50; // Sample window width in mS (50 mS = 20Hz)
+unsigned int sample;
+
+double voltMax = 0;
+
+int closed = 60; // Mouth closed position
+int range = 30; // How much to open mouth
+
+void lower(){
+  analogWrite(ENABLE,LOWER_STRENGTH);
+  if (digitalRead(LOWER_CLEAR)){
+    digitalWrite(RAISE,0);
+    digitalWrite(LOWER,1);
+  } else {
+  digitalWrite(RAISE,0);
+  digitalWrite(LOWER,0);
+  }
+}
+
+void raise(){
+  analogWrite(ENABLE,RAISE_STRENGTH);
+  if (digitalRead(RAISE_CLEAR)){
+    digitalWrite(RAISE,1);
+    digitalWrite(LOWER,0);
+  } else {
+  digitalWrite(RAISE,0);
+  digitalWrite(LOWER,0);
+  }
+}
+
+void setup() {
+  // put your setup code here, to run once:
+ dmx_slave.enable ();
+ dmx_slave.setStartAddress (21);
+ jaw.attach(JAW_PIN);
+ pinMode(ENABLE,OUTPUT);
+ pinMode(RAISE,OUTPUT);
+ pinMode(LOWER,OUTPUT);
+ pinMode(RAISE_CLEAR,INPUT_PULLUP);
+ pinMode(LOWER_CLEAR,INPUT_PULLUP);
+ digitalWrite(RAISE,1);
+ digitalWrite(LOWER,0);
+}
+
+void loop() {
+
+  int target;
+
+  unsigned long startMillis= millis();  // Start of sample window
+   unsigned int peakToPeak = 0;   // peak-to-peak level
+ 
+   unsigned int signalMax = 0;
+   unsigned int signalMin = 1024;
+ 
+   // collect data for 50 mS
+   while (millis() - startMillis < sampleWindow)
+   {
+      if ( dmx_slave.getChannelValue (1) > 64 ){
+        raise();
+      } else {
+        lower();
+      }
+      sample = analogRead(MIC_PIN);
+      if (sample < 1024)  // toss out spurious readings
+      {
+         if (sample > signalMax)
+         {
+            signalMax = sample;  // save just the max levels
+         }
+         else if (sample < signalMin)
+         {
+            signalMin = sample;  // save just the min levels
+         }
+      }
+   }
+   peakToPeak = signalMax - signalMin;  // max - min = peak-peak amplitude
+   double volts = (peakToPeak * 3.3) / 1024;  // convert to volts
+
+   if(volts>voltMax){ // find the top of the region of voltage levels
+    voltMax=volts;
+   }
+
+   double loudness = (volts/voltMax)-0.2; // deadband of 0.2
+   int servoPos = -loudness*(range)+closed;
+   
+
+
+   if(loudness>0.0){ // if outside deadband
+      jaw.write(servoPos);
+   }else{
+     jaw.write(closed);
+   }
+}
